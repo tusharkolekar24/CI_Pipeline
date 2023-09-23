@@ -1,0 +1,56 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+# We'll define some variables for later use
+variables:
+  pythonVersion: 3.8
+  package: simple_packages
+  srcDirectory: src/$(package)
+  testsDirectory: tests/$(package)
+#  system.debug: 'true'
+
+trigger:
+  branches:
+    include:
+      - "*"    # We're only uploading to build artifacts, so it's safe to trigger on all branches
+
+  paths:
+      include:
+      # - .azure-pipelines/basic_build.yml
+      - src/simple_package/*
+      - tests/simple_package/*
+      
+pool:
+  name: Azure Pipelines
+
+# Steps are the specific tasks that execute code and do things
+steps:
+
+# Use a specific Python version
+- task: UsePythonVersion@0
+  displayName: Use Python $(pythonVersion)
+  inputs:
+    versionSpec: $(pythonVersion)
+
+# Install some tools needed for build (pylint, flake8, etc)
+- bash: pip install -r requirements.txt
+  displayName: Install packages for build
+
+# Run tests
+- bash: pytest
+  displayName: Run tests
+  workingDirectory: $(testsDirectory)
+
+# Our built source dist & wheel will land in src/simple_package/dist
+- bash: python setup.py sdist bdist_wheel
+  displayName: Build package
+  workingDirectory: $(srcDirectory)
+
+# Upload everything in src/simple_package/dist to the build artifacts for later use or debugging
+- task: PublishPipelineArtifact@0
+  displayName: Publish artifacts
+  inputs:
+    artifactName: dist
+    targetPath: $(srcDirectory)/dist

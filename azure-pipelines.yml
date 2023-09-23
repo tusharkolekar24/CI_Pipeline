@@ -1,0 +1,111 @@
+# Python package
+# Create and test a Python package on multiple Python versions.
+# Add steps that analyze code, save the dist with the build record, publish to a PyPI-compatible index, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/python
+
+# We'll define some variables for later use
+variables:
+  pythonVersion: 3.7
+  package: simple_packages
+  srcDirectory: src/$(package)
+  testsDirectory: tests/$(package)
+  artifactFeed: artifacts
+  publishedVersion: 3.7
+
+trigger:
+  branches:
+    include:
+      - "*"    # We're only uploading to build artifacts, so it's safe to trigger on all branches
+
+  paths:
+      include:
+      # - .azure-pipelines/basic_build.yml
+      - src/simple_package/*
+      - tests/simple_package/*
+
+# Jobs are collections of related steps
+jobs:
+
+# We define one Job to lint and test our package against multiple Python versions in parallel
+- job: Build
+
+  pool:
+      name: Azure Pipelines
+
+  # Steps are the specific tasks that execute code and do things
+  steps:
+
+  # Use a specific Python version
+  - task: UsePythonVersion@0
+    displayName: Use Python $(pythonVersion)
+    inputs:
+      versionSpec: $(pythonVersion)
+
+  # Install some tools needed for build (pylint, flake8, etc)
+  - bash: pip install -r requirements.txt
+    displayName: Install packages for build
+
+  # Run tests
+  - bash: pytest
+    displayName: Run tests
+    workingDirectory: $(testsDirectory)
+
+  # Our built source dist & wheel will land in src/simple_package/dist
+  - bash: python setup.py sdist bdist_wheel
+    displayName: Build package
+    workingDirectory: $(srcDirectory)
+
+  # Upload everything in src/simple_package/dist to the build artifacts for later use or debugging
+  - task: PublishPipelineArtifact@0
+    displayName: Publish artifacts
+    inputs:
+      artifactName: dist$(pythonVersion)
+      targetPath: $(srcDirectory)/dist
+    
+# we will download one of the already-validated build assets and publish it to an Azure Artifacts feed
+- job: Publish
+
+  pool:
+      name: Azure Pipelines
+
+  # We want to wait for all Build Jobs to complete before running the Publish Job
+  dependsOn: Build
+
+  # Only publish when the previous Jobs are successful and we're building the master branch
+  condition: and(succeeded(), eq(variables['build.sourceBranch'], 'refs/heads/main'))
+
+  # Variables specific to the Publish job
+  variables:
+    artifactName: dist$(publishedVersion)
+    pythonVersion: 3.7
+
+  # Steps are the specific tasks that execute code and do things
+  steps:
+
+  # Explicitly disable source checkout to keep a pristine environment for publishing
+  - checkout: none
+
+  # Download from build artifacts
+  - download: current
+    artifact: $(artifactName)
+
+  # Set the version of Python to use for publishing (which may or may not match the version the package was built with or tested against)
+  - task: UsePythonVersion@0
+    displayName: Use Python $(pythonVersion)
+    inputs:
+      versionSpec: $(pythonVersion)
+
+  # Install tools needed for publishing
+  - bash: python -m pip install twine
+  - bash: python -m pip install --upgrade twine
+  - bash: pip install twine keyring artifacts-keyring
+    displayName: Install twine
+
+  - task: TwineAuthenticate@1
+    displayName: Configure twine authentication
+    inputs:
+      artifactFeed: test_project/$(artifactFeed)
+
+  # Upload everything in the dist folder to the private Artifacts feed 
+  - bash: python -m twine upload -r $(artifactFeed) --config-file $(PYPIRC_PATH) $(Pipeline.Workspace)/$(artifactName)/*
+    displayName: Publish artifacts

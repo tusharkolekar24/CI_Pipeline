@@ -1,0 +1,7 @@
+pip
+pytest
+pytest-azurepipelines
+pytest-cov
+wheel
+numpy
+pandas
